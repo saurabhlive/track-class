@@ -3,181 +3,287 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Traclass - Teacher Attendance Manager</title>
+    <title>Traclass - Teacher Attendance Management</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-    <script>
-        // Replace with your actual Supabase project URL and Anon Key
-        const SUPABASE_URL = "https://plmkvmcfhdgyrlqpygln.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsbWt2bWNmaGRneXJscXB5Z2xuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQyMTA1ODEsImV4cCI6MjA2OTc4NjU4MX0.-PP3zXKQs1IVo747Vka6VU2x02tIYdL27qe4EPSs3nM";
-
-        // Initialize Supabase client
-        const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        // This 'supabase' object will now be globally available in app.js
-        console.log("Supabase client initialized:", supabase);
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
-<body>
-    <div id="loginScreen" class="login-screen">
-        <div class="login-container">
-            <div class="login-header">
-                <i class="fas fa-graduation-cap"></i>
-                <h1>Traclass</h1>
-                <p>Sign in to manage your individual student lessons</p>
+<body data-color-scheme="dark">
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2 class="app-title">Traclass</h2>
             </div>
-            <form id="loginForm" class="login-form">
-                <div class="form-group">
-                    <label for="email" class="form-label">Email</label>
-                    <input type="email" id="email" class="form-control" placeholder="Enter email" required>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <button class="nav-link active" data-tab="dashboard">
+                        <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="9"></rect>
+                            <rect x="14" y="3" width="7" height="5"></rect>
+                            <rect x="14" y="12" width="7" height="9"></rect>
+                            <rect x="3" y="16" width="7" height="5"></rect>
+                        </svg>
+                        Dashboard
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-tab="students">
+                        <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                        Students
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-tab="classes">
+                        <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                        </svg>
+                        Classes
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-tab="attendance">
+                        <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11H3l5-5 5 5"></path>
+                            <path d="M22 12h-6l5 5 5-5"></path>
+                            <path d="M2 12h20"></path>
+                        </svg>
+                        Attendance
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-content active">
+                <div class="tab-header">
+                    <div>
+                        <h1>Dashboard</h1>
+                        <p class="tab-description">Overview of completed classes for all students</p>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="password" class="form-label">Password</label>
-                    <input type="password" id="password" class="form-control" placeholder="Enter password" required>
+                <div class="dashboard-content">
+                    <div class="dashboard-chart-section">
+                        <div class="chart-container" style="position: relative; height: 400px;">
+                            <canvas id="attendanceChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-controls-section">
+                        <h3>Select Checklist Period</h3>
+                        <div id="chartDropdowns" class="chart-dropdowns"></div>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn--primary">Sign In</button>
-                <p id="loginMessage" style="color: var(--color-error); margin-top: 10px;"></p>
-            </form>
-        </div>
+            </div>
+
+            <!-- Students Tab -->
+            <div id="students" class="tab-content">
+                <div class="tab-header">
+                    <div>
+                        <h1>Students</h1>
+                        <p class="tab-description">Manage your students and their information</p>
+                    </div>
+                    <div class="tab-actions">
+                        <button class="btn btn--secondary" id="toggleArchivedBtn">Show Archived</button>
+                        <button class="btn btn--primary" id="addStudentBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Add Student
+                        </button>
+                    </div>
+                </div>
+                <div class="students-grid" id="studentsGrid"></div>
+            </div>
+
+            <!-- Classes Tab -->
+            <div id="classes" class="tab-content">
+                <div class="tab-header">
+                    <div>
+                        <h1>Class Types</h1>
+                        <p class="tab-description">Manage the different types of classes you offer</p>
+                    </div>
+                    <button class="btn btn--primary" id="addClassBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Class Type
+                    </button>
+                </div>
+                <div class="classes-grid" id="classesGrid"></div>
+            </div>
+
+            <!-- Attendance Tab -->
+            <div id="attendance" class="tab-content">
+                <div class="tab-header">
+                    <div>
+                        <h1>Attendance Checklists</h1>
+                        <p class="tab-description">Track student attendance with interactive checklists</p>
+                    </div>
+                    <button class="btn btn--primary" id="addChecklistBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        New Checklist
+                    </button>
+                </div>
+                <div class="attendance-container">
+                    <div id="attendanceStudentList" class="attendance-students"></div>
+                </div>
+            </div>
+        </main>
     </div>
 
-    <div id="dashboardScreen" class="hidden">
-        <div class="dashboard-header container">
-            <div class="flex items-center gap-4">
-                <i class="fas fa-graduation-cap text-3xl text-brown-600"></i>
-                <h1 id="dashboardTitle">Traclass</h1>
-            </div>
-            <div class="user-info">
-                <div class="user-avatar">T</div>
-                <span id="loggedInUserEmail"></span>
-                <button id="logoutBtn" class="btn btn--ghost"><i class="fas fa-sign-out-alt"></i> Logout</button>
-            </div>
-        </div>
-        <div class="main-content container">
-            <div class="sidebar">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">Students</h3>
-                        <button id="addStudentBtn" class="btn btn--primary btn--xs"><i class="fas fa-plus"></i> Add</button>
-                    </div>
-                    <div id="studentList" class="student-list">
-                        </div>
-                </div>
-            </div>
-
-            <div id="contentArea" class="content-area">
-                <div class="tabs">
-                    <button id="checklistsTabBtn" class="tab-btn active">Checklists</button>
-                    <button id="analyticsTabBtn" class="tab-btn">Analytics</button>
-                </div>
-                <div id="checklistsTab" class="tab-content">
-                    <div class="card-header">
-                        <h3 class="card-title" id="checklistsHeader"></h3>
-                        <button id="newChecklistBtn" class="btn btn--primary btn--xs"><i class="fas fa-plus"></i> New Checklist</button>
-                    </div>
-                    <div id="checklistList" class="checklist-list">
-                        </div>
-                    <div id="checklistsEmptyState" class="empty-state hidden">
-                        <i class="fas fa-list-check"></i>
-                        <h3>No checklists found</h3>
-                        <p>Start by creating a new checklist for this student.</p>
-                    </div>
-                </div>
-                <div id="analyticsTab" class="tab-content hidden">
-                    <div id="reportCard" class="card">
-                        <div class="card-header">
-                            <h3 class="card-title" id="analyticsHeader"></h3>
-                            <button id="shareReportBtn" class="btn btn--outline"><i class="fas fa-share-alt"></i> Share Report</button>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="completionChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-                <div id="emptyState" class="empty-state hidden">
-                    <i class="fas fa-user-friends"></i>
-                    <h3>Select a student</h3>
-                    <p>Choose a student from the sidebar to view their details.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="checklistDetailModal" class="modal hidden">
+    <!-- Modals -->
+    <!-- Student Modal -->
+    <div id="studentModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="checklistTitle"></h3>
-                <button class="modal-close" data-modal-id="checklistDetailModal">&times;</button>
+                <h3 id="studentModalTitle">Add Student</h3>
+                <button class="modal-close" id="closeStudentModal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
             </div>
             <div class="modal-body">
-                <div class="checklist-detail-header">
-                    <h3 id="checklistDetailHeader"></h3>
-                    <button id="shareChecklistBtn" class="btn btn--primary btn--xs hidden"><i class="fas fa-share-alt"></i> Share Report</button>
-                </div>
-                <ul id="checklistItems" class="checklist-items">
-                    </ul>
+                <form id="studentForm">
+                    <div class="form-group">
+                        <label class="form-label" for="studentName">Name</label>
+                        <input type="text" id="studentName" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="studentPhone">Phone Number</label>
+                        <input type="tel" id="studentPhone" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="studentClass">Class Type</label>
+                        <select id="studentClass" class="form-control" required>
+                            <option value="">Select a class type</option>
+                        </select>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn--secondary" id="cancelStudentBtn">Cancel</button>
+                        <button type="submit" class="btn btn--primary">Save Student</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
 
-    <div id="editChecklistModal" class="modal hidden">
-        <div class="modal-content modal-content--sm">
+    <!-- Class Modal -->
+    <div id="classModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
             <div class="modal-header">
-                <h3>Edit Checklist</h3>
-                <button class="modal-close" data-modal-id="editChecklistModal">&times;</button>
-            </div>
-            <form id="editChecklistForm" class="modal-body">
-                <div class="form-group">
-                    <label for="period" class="form-label">Period</label>
-                    <input type="text" id="period" class="form-control" required>
-                </div>
-                <div class="form-group">
-                    <label for="totalSlots" class="form-label">Total Slots</label>
-                    <input type="number" id="totalSlots" class="form-control" required>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn--outline modal-cancel" data-modal-id="editChecklistModal">Cancel</button>
-                    <button type="submit" class="btn btn--primary">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div id="editItemModal" class="modal hidden">
-        <div class="modal-content modal-content--sm">
-            <div class="modal-header">
-                <h3>Edit Checklist Item</h3>
-                <button class="modal-close" data-modal-id="editItemModal">&times;</button>
-            </div>
-            <form id="editItemForm" class="modal-body">
-                <div class="form-group">
-                    <label for="itemName" class="form-label">Item Name</label>
-                    <input type="text" id="itemName" class="form-control" required>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn--outline modal-cancel" data-modal-id="editItemModal">Cancel</button>
-                    <button type="submit" class="btn btn--primary">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div id="confirmModal" class="modal hidden">
-        <div class="modal-content modal-content--sm">
-            <div class="modal-header">
-                <h3 id="confirmTitle">Confirm Action</h3>
-                <button class="modal-close" data-modal-id="confirmModal">&times;</button>
+                <h3 id="classModalTitle">Add Class Type</h3>
+                <button class="modal-close" id="closeClassModal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
             </div>
             <div class="modal-body">
-                <p id="confirmMessage">Are you sure you want to proceed?</p>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn--outline modal-cancel" data-modal-id="confirmModal">Cancel</button>
-                    <button type="button" class="btn btn--primary" id="confirmAction">Confirm</button>
+                <form id="classForm">
+                    <div class="form-group">
+                        <label class="form-label" for="className">Class Name</label>
+                        <input type="text" id="className" class="form-control" required>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn--secondary" id="cancelClassBtn">Cancel</button>
+                        <button type="submit" class="btn btn--primary">Save Class Type</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Modal -->
+    <div id="checklistModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="checklistModalTitle">New Checklist</h3>
+                <button class="modal-close" id="closeChecklistModal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="checklistForm">
+                    <div class="form-group">
+                        <label class="form-label" for="checklistStudent">Student</label>
+                        <select id="checklistStudent" class="form-control" required>
+                            <option value="">Select a student</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="checklistPeriod">Period</label>
+                        <input type="text" id="checklistPeriod" class="form-control" placeholder="e.g., January 2025" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="checklistSlots">Number of Class Slots</label>
+                        <input type="number" id="checklistSlots" class="form-control" min="1" max="20" value="4" required>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn--secondary" id="cancelChecklistBtn">Cancel</button>
+                        <button type="submit" class="btn btn--primary">Create Checklist</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checklist Detail View -->
+    <div id="checklistDetailModal" class="modal modal--fullscreen hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content modal-content--large">
+            <div class="checklist-detail-header">
+                <button class="btn btn--secondary back-btn" id="closeChecklistDetailModal">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    Back to Students
+                </button>
+                <div id="checklistDetailHeaderContent" class="student-profile"></div>
+            </div>
+            <div class="modal-body">
+                <div class="checklist-progress-section">
+                    <div id="checklistProgressBar" class="progress-section"></div>
+                </div>
+                <div id="checklistDetailContent" class="checklist-detail-content"></div>
+                <div class="checklist-actions">
+                    <button type="button" class="btn btn--secondary" id="addSlotBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Slot
+                    </button>
+                    <button type="button" class="btn btn--secondary" id="hideChecklistBtn">Hide Checklist</button>
+                    <button type="button" class="btn btn--secondary" id="shareChecklistBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7,10 12,15 17,10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Share Checklist
+                    </button>
                 </div>
             </div>
         </div>
