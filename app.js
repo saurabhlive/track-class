@@ -1,4 +1,4 @@
-// Traclass App - Teacher Attendance Management
+// Traclass App - Teacher Attendance Management with Google Drive Integration
 class TraclassApp {
     constructor() {
         this.data = {
@@ -13,112 +13,556 @@ class TraclassApp {
         this.editingClass = null;
         this.currentChecklist = null;
         this.chart = null;
-        this.expandedStudents = new Set(); // Track which students are expanded in attendance view
+        this.expandedStudents = new Set();
+        
+        // Google Drive API configuration
+        this.CLIENT_ID = '110782429340-clseshfimb7a4tmsari0961fg5qm7ftc.apps.googleusercontent.com';
+        this.API_KEY = 'AIzaSyAWrjJdTtxSsGpkO3tieCiHARiPJg8659c';
+        this.DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+        this.SCOPES = 'https://www.googleapis.com/auth/drive.file';
+        this.DATA_FILE_NAME = 'traclass-data.json';
+        
+        // Authentication state
+        this.isAuthenticated = false;
+        this.gapiInitialized = false;
+        this.gisInitialized = false;
+        this.tokenClient = null;
+        this.dataFileId = null;
+        this.userInfo = null;
+        this.bypassAuth = false;
         
         this.init();
     }
 
-    init() {
-        this.loadData();
-        this.setupEventListeners();
-        this.renderAll();
-        this.showTab('dashboard');
-    }
-
-    // Data Management
-    loadData() {
-        const storedData = localStorage.getItem('traclassData');
-        if (storedData) {
-            this.data = JSON.parse(storedData);
-        } else {
-            // Load sample data from the provided JSON
-            this.data = {
-                students: [
-                    { id: 1, name: "Emma Johnson", phone: "+1-555-0123", classType: "Piano", archived: false },
-                    { id: 2, name: "Liam Chen", phone: "+1-555-0124", classType: "Guitar", archived: false },
-                    { id: 3, name: "Sophia Rodriguez", phone: "+1-555-0125", classType: "Violin", archived: false },
-                    { id: 4, name: "Noah Thompson", phone: "+1-555-0126", classType: "Math", archived: false },
-                    { id: 5, name: "Devansh", phone: "+1-555-0127", classType: "Guitar", archived: false }
-                ],
-                classTypes: [
-                    { id: 1, name: "Piano" },
-                    { id: 2, name: "Guitar" },
-                    { id: 3, name: "Violin" },
-                    { id: 4, name: "Math" },
-                    { id: 5, name: "Science" },
-                    { id: 6, name: "English" }
-                ],
-                checklists: [
-                    {
-                        id: 1, studentId: 1, period: "January 2025",
-                        slots: [
-                            { id: 1, name: "Class 1", completed: true },
-                            { id: 2, name: "Class 2", completed: true },
-                            { id: 3, name: "Class 3", completed: false },
-                            { id: 4, name: "Class 4", completed: false }
-                        ]
-                    },
-                    {
-                        id: 2, studentId: 1, period: "December 2024",
-                        slots: [
-                            { id: 1, name: "Class 1", completed: true },
-                            { id: 2, name: "Class 2", completed: true },
-                            { id: 3, name: "Class 3", completed: true },
-                            { id: 4, name: "Class 4", completed: false }
-                        ]
-                    },
-                    {
-                        id: 3, studentId: 2, period: "January 2025",
-                        slots: [
-                            { id: 1, name: "Class 1", completed: true },
-                            { id: 2, name: "Class 2", completed: true },
-                            { id: 3, name: "Class 3", completed: true },
-                            { id: 4, name: "Class 4", completed: true },
-                            { id: 5, name: "Class 5", completed: false },
-                            { id: 6, name: "Class 6", completed: false }
-                        ]
-                    },
-                    {
-                        id: 4, studentId: 3, period: "January 2025",
-                        slots: [
-                            { id: 1, name: "Class 1", completed: true },
-                            { id: 2, name: "Class 2", completed: false },
-                            { id: 3, name: "Class 3", completed: false },
-                            { id: 4, name: "Class 4", completed: false }
-                        ]
-                    },
-                    {
-                        id: 5, studentId: 4, period: "January 2025",
-                        slots: [
-                            { id: 1, name: "Lesson 1", completed: true },
-                            { id: 2, name: "Lesson 2", completed: true },
-                            { id: 3, name: "Lesson 3", completed: true },
-                            { id: 4, name: "Lesson 4", completed: false },
-                            { id: 5, name: "Lesson 5", completed: false },
-                            { id: 6, name: "Lesson 6", completed: false },
-                            { id: 7, name: "Lesson 7", completed: false },
-                            { id: 8, name: "Lesson 8", completed: false }
-                        ]
-                    },
-                    {
-                        id: 6, studentId: 5, period: "November-December",
-                        slots: [
-                            { id: 1, name: "Class 1 (1 Nov)", completed: true },
-                            { id: 2, name: "Class 2 (8 Nov)", completed: false },
-                            { id: 3, name: "Class 3 (15 Nov)", completed: false },
-                            { id: 4, name: "Class 4 (22 Nov)", completed: false },
-                            { id: 5, name: "Class 5 (29 Nov)", completed: false },
-                            { id: 6, name: "Class 6 (6 Dec)", completed: false }
-                        ]
-                    }
-                ]
-            };
-            this.saveData();
+    async init() {
+        console.log('Initializing Traclass app...');
+        
+        // Set up offline button listeners immediately
+        this.setupOfflineButtonListeners();
+        
+        // Check if we should bypass authentication (for testing)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('bypass') === 'true' || window.location.hostname === 'localhost') {
+            this.bypassAuth = true;
+            console.log('Bypassing authentication for testing');
+            this.initializeOfflineMode();
+            return;
+        }
+        
+        // Try to initialize Google APIs with timeout
+        try {
+            await Promise.race([
+                this.initializeGoogleAPIs(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+            ]);
+        } catch (error) {
+            console.warn('Google APIs initialization failed or timed out:', error);
+            this.showAuthFallback();
         }
     }
 
-    saveData() {
-        localStorage.setItem('traclassData', JSON.stringify(this.data));
+    setupOfflineButtonListeners() {
+        // Set up offline button listeners
+        const continueOfflineBtn = document.getElementById('continueOfflineBtn');
+        if (continueOfflineBtn) {
+            continueOfflineBtn.addEventListener('click', () => {
+                console.log('Continue Offline button clicked');
+                this.continueOffline();
+            });
+        }
+
+        // Set up retry offline button listener (will be created later)
+        setTimeout(() => {
+            const retryOfflineBtn = document.getElementById('retryOfflineBtn');
+            if (retryOfflineBtn) {
+                retryOfflineBtn.addEventListener('click', () => {
+                    console.log('Retry Offline button clicked');
+                    this.continueOffline();
+                });
+            }
+        }, 100);
+
+        // Set up sign out button listener
+        setTimeout(() => {
+            const signOutBtn = document.getElementById('signOutBtn');
+            if (signOutBtn) {
+                signOutBtn.addEventListener('click', () => {
+                    console.log('Sign Out button clicked');
+                    this.signOut();
+                });
+            }
+        }, 100);
+    }
+
+    async initializeOfflineMode() {
+        console.log('Starting in offline mode with sample data');
+        this.isAuthenticated = true;
+        this.bypassAuth = true;
+        this.userInfo = { name: 'Demo User', email: 'demo@example.com' };
+        
+        this.hideAuthOverlay();
+        this.loadSampleData();
+        this.setupEventListeners();
+        this.renderAll();
+        this.showTab('dashboard');
+        this.updateUserProfile();
+        this.updateSyncStatus('offline', 'Offline Mode');
+    }
+
+    showAuthFallback() {
+        // Show fallback option to continue without Google Drive
+        const authError = document.getElementById('authError');
+        if (authError) {
+            authError.innerHTML = `
+                <p>Google Drive sync is not available.</p>
+                <p>Continue with offline mode to test the application.</p>
+                <button class="btn btn--primary" id="retryOfflineBtn">Continue Offline</button>
+                <button class="btn btn--secondary" onclick="location.reload()">Retry</button>
+            `;
+            authError.classList.remove('hidden');
+            
+            // Re-setup the retry offline button listener
+            setTimeout(() => {
+                const retryOfflineBtn = document.getElementById('retryOfflineBtn');
+                if (retryOfflineBtn) {
+                    retryOfflineBtn.addEventListener('click', () => {
+                        console.log('Retry Offline button clicked');
+                        this.continueOffline();
+                    });
+                }
+            }, 100);
+        }
+        
+        // Hide loading and sign-in button
+        const loading = document.getElementById('authLoading');
+        const signInButton = document.querySelector('.g_id_signin');
+        if (loading) loading.classList.add('hidden');
+        if (signInButton) signInButton.style.display = 'none';
+    }
+
+    continueOffline() {
+        console.log('Continuing in offline mode...');
+        this.bypassAuth = true;
+        this.initializeOfflineMode();
+    }
+
+    // Google API Initialization
+    async initializeGoogleAPIs() {
+        try {
+            console.log('Loading Google APIs...');
+            
+            // Check if Google APIs are available
+            if (typeof gapi === 'undefined') {
+                throw new Error('Google API library not loaded');
+            }
+            
+            // Initialize GAPI
+            await new Promise((resolve, reject) => {
+                gapi.load('client', {
+                    callback: resolve,
+                    onerror: reject,
+                    timeout: 5000,
+                    ontimeout: reject
+                });
+            });
+
+            await gapi.client.init({
+                apiKey: this.API_KEY,
+                discoveryDocs: [this.DISCOVERY_DOC],
+            });
+            
+            this.gapiInitialized = true;
+            console.log('GAPI initialized');
+
+            // Initialize Google Identity Services
+            if (typeof google !== 'undefined' && google.accounts) {
+                this.tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: this.CLIENT_ID,
+                    scope: this.SCOPES,
+                    callback: (tokenResponse) => {
+                        console.log('Token received:', tokenResponse);
+                        if (tokenResponse.error) {
+                            console.error('Token error:', tokenResponse.error);
+                            this.showAuthFallback();
+                        } else {
+                            this.handleAuthSuccess(tokenResponse);
+                        }
+                    },
+                    error_callback: (error) => {
+                        console.error('Token client error:', error);
+                        this.showAuthFallback();
+                    }
+                });
+                this.gisInitialized = true;
+                console.log('Google Identity Services initialized');
+            } else {
+                throw new Error('Google Identity Services not available');
+            }
+
+            // Set up global callback for credential response
+            window.handleCredentialResponse = (credentialResponse) => {
+                console.log('Credential response received');
+                this.handleCredentialResponse(credentialResponse);
+            };
+
+            this.showAuthOverlay();
+            
+        } catch (error) {
+            console.error('Failed to initialize Google APIs:', error);
+            throw error;
+        }
+    }
+
+    handleCredentialResponse(credentialResponse) {
+        console.log('Processing credential response...');
+        this.showAuthLoading();
+        
+        try {
+            // Request access token
+            if (this.tokenClient) {
+                this.tokenClient.requestAccessToken({ prompt: 'consent' });
+            } else {
+                throw new Error('Token client not initialized');
+            }
+        } catch (error) {
+            console.error('Error requesting access token:', error);
+            this.showAuthFallback();
+        }
+    }
+
+    async handleAuthSuccess(tokenResponse) {
+        try {
+            console.log('Authentication successful');
+            this.isAuthenticated = true;
+            
+            // Get user info
+            const response = await gapi.client.request({
+                path: 'https://www.googleapis.com/oauth2/v2/userinfo',
+            });
+            
+            this.userInfo = response.result;
+            console.log('User info:', this.userInfo);
+            
+            this.hideAuthOverlay();
+            await this.loadDataFromDrive();
+            this.setupEventListeners();
+            this.renderAll();
+            this.showTab('dashboard');
+            this.updateUserProfile();
+            this.updateSyncStatus('synced');
+            
+        } catch (error) {
+            console.error('Authentication error:', error);
+            this.showAuthFallback();
+        }
+    }
+
+    showAuthOverlay() {
+        const overlay = document.getElementById('authOverlay');
+        if (overlay) {
+            overlay.classList.remove('hidden');
+            
+            // Add escape key handler
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    this.showAuthFallback();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        }
+    }
+
+    hideAuthOverlay() {
+        const overlay = document.getElementById('authOverlay');
+        if (overlay) {
+            overlay.classList.add('hidden');
+        }
+    }
+
+    showAuthLoading() {
+        const loading = document.getElementById('authLoading');
+        const error = document.getElementById('authError');
+        const signInButton = document.querySelector('.g_id_signin');
+        const continueOfflineBtn = document.getElementById('continueOfflineBtn');
+        
+        if (loading) loading.classList.remove('hidden');
+        if (error) error.classList.add('hidden');
+        if (signInButton) signInButton.style.display = 'none';
+        if (continueOfflineBtn) continueOfflineBtn.style.display = 'none';
+    }
+
+    updateUserProfile() {
+        if (!this.userInfo) return;
+        
+        const userAvatar = document.getElementById('userAvatar');
+        const userName = document.getElementById('userName');
+        const userEmail = document.getElementById('userEmail');
+        
+        if (userAvatar) {
+            const initials = this.userInfo.name ? 
+                this.userInfo.name.split(' ').map(n => n[0]).join('').toUpperCase() : 
+                this.userInfo.email[0].toUpperCase();
+            userAvatar.textContent = initials;
+        }
+        
+        if (userName) {
+            userName.textContent = this.userInfo.name || 'User';
+        }
+        
+        if (userEmail) {
+            userEmail.textContent = this.userInfo.email || '';
+        }
+    }
+
+    updateSyncStatus(status, message = '') {
+        const indicator = document.getElementById('syncIndicator');
+        const text = document.getElementById('syncText');
+        
+        if (!indicator || !text) return;
+        
+        indicator.className = 'sync-indicator';
+        
+        switch (status) {
+            case 'syncing':
+                indicator.classList.add('syncing');
+                text.textContent = message || 'Syncing...';
+                break;
+            case 'synced':
+                text.textContent = 'Synced';
+                break;
+            case 'offline':
+                indicator.classList.add('error');
+                text.textContent = message || 'Offline';
+                break;
+            case 'error':
+                indicator.classList.add('error');
+                text.textContent = message || 'Sync Error';
+                break;
+        }
+    }
+
+    async signOut() {
+        try {
+            if (!this.bypassAuth && gapi.client.getToken()) {
+                google.accounts.oauth2.revoke(gapi.client.getToken().access_token);
+                gapi.client.setToken('');
+            }
+            
+            this.isAuthenticated = false;
+            this.userInfo = null;
+            this.dataFileId = null;
+            this.data = { students: [], classTypes: [], checklists: [] };
+            
+            location.reload();
+        } catch (error) {
+            console.error('Sign out error:', error);
+            location.reload();
+        }
+    }
+
+    // Google Drive Data Management
+    async loadDataFromDrive() {
+        if (this.bypassAuth) {
+            console.log('Bypass mode: loading sample data');
+            this.loadSampleData();
+            return;
+        }
+
+        try {
+            this.updateSyncStatus('syncing', 'Loading data...');
+            console.log('Loading data from Google Drive...');
+            
+            // Search for existing data file
+            const searchResponse = await gapi.client.drive.files.list({
+                q: `name='${this.DATA_FILE_NAME}' and mimeType='application/json'`,
+                spaces: 'drive'
+            });
+
+            const files = searchResponse.result.files;
+            
+            if (files && files.length > 0) {
+                // File exists, load it
+                this.dataFileId = files[0].id;
+                console.log('Found existing data file:', this.dataFileId);
+                
+                const fileResponse = await gapi.client.drive.files.get({
+                    fileId: this.dataFileId,
+                    alt: 'media'
+                });
+                
+                if (fileResponse.body) {
+                    const fileData = JSON.parse(fileResponse.body);
+                    this.data = fileData;
+                    console.log('Data loaded from Drive:', this.data);
+                }
+            } else {
+                // No file exists, create with sample data
+                console.log('No existing data file found, creating with sample data');
+                this.loadSampleData();
+                await this.saveDataToDrive();
+            }
+            
+            this.updateSyncStatus('synced');
+            
+        } catch (error) {
+            console.error('Error loading data from Drive:', error);
+            this.updateSyncStatus('error', 'Load failed');
+            
+            // Fallback to sample data
+            this.loadSampleData();
+        }
+    }
+
+    loadSampleData() {
+        this.data = {
+            students: [
+                { id: 1, name: "Emma Johnson", phone: "+1-555-0123", classType: "Piano", archived: false },
+                { id: 2, name: "Liam Chen", phone: "+1-555-0124", classType: "Guitar", archived: false },
+                { id: 3, name: "Sophia Rodriguez", phone: "+1-555-0125", classType: "Violin", archived: false },
+                { id: 4, name: "Noah Thompson", phone: "+1-555-0126", classType: "Math", archived: false },
+                { id: 5, name: "Devansh", phone: "+1-555-0127", classType: "Guitar", archived: false }
+            ],
+            classTypes: [
+                { id: 1, name: "Piano" },
+                { id: 2, name: "Guitar" },
+                { id: 3, name: "Violin" },
+                { id: 4, name: "Math" },
+                { id: 5, name: "Science" },
+                { id: 6, name: "English" }
+            ],
+            checklists: [
+                {
+                    id: 1, studentId: 1, period: "January 2025",
+                    slots: [
+                        { id: 1, name: "Class 1", completed: true },
+                        { id: 2, name: "Class 2", completed: true },
+                        { id: 3, name: "Class 3", completed: false },
+                        { id: 4, name: "Class 4", completed: false }
+                    ]
+                },
+                {
+                    id: 2, studentId: 1, period: "December 2024",
+                    slots: [
+                        { id: 1, name: "Class 1", completed: true },
+                        { id: 2, name: "Class 2", completed: true },
+                        { id: 3, name: "Class 3", completed: true },
+                        { id: 4, name: "Class 4", completed: false }
+                    ]
+                },
+                {
+                    id: 3, studentId: 2, period: "January 2025",
+                    slots: [
+                        { id: 1, name: "Class 1", completed: true },
+                        { id: 2, name: "Class 2", completed: true },
+                        { id: 3, name: "Class 3", completed: true },
+                        { id: 4, name: "Class 4", completed: true },
+                        { id: 5, name: "Class 5", completed: false },
+                        { id: 6, name: "Class 6", completed: false }
+                    ]
+                },
+                {
+                    id: 4, studentId: 3, period: "January 2025",
+                    slots: [
+                        { id: 1, name: "Class 1", completed: true },
+                        { id: 2, name: "Class 2", completed: false },
+                        { id: 3, name: "Class 3", completed: false },
+                        { id: 4, name: "Class 4", completed: false }
+                    ]
+                },
+                {
+                    id: 5, studentId: 4, period: "January 2025",
+                    slots: [
+                        { id: 1, name: "Lesson 1", completed: true },
+                        { id: 2, name: "Lesson 2", completed: true },
+                        { id: 3, name: "Lesson 3", completed: true },
+                        { id: 4, name: "Lesson 4", completed: false },
+                        { id: 5, name: "Lesson 5", completed: false },
+                        { id: 6, name: "Lesson 6", completed: false },
+                        { id: 7, name: "Lesson 7", completed: false },
+                        { id: 8, name: "Lesson 8", completed: false }
+                    ]
+                },
+                {
+                    id: 6, studentId: 5, period: "November-December",
+                    slots: [
+                        { id: 1, name: "Class 1 (1 Nov)", completed: true },
+                        { id: 2, name: "Class 2 (8 Nov)", completed: false },
+                        { id: 3, name: "Class 3 (15 Nov)", completed: false },
+                        { id: 4, name: "Class 4 (22 Nov)", completed: false },
+                        { id: 5, name: "Class 5 (29 Nov)", completed: false },
+                        { id: 6, name: "Class 6 (6 Dec)", completed: false }
+                    ]
+                }
+            ]
+        };
+    }
+
+    async saveDataToDrive() {
+        if (this.bypassAuth || !this.isAuthenticated) {
+            console.log('Bypass mode or not authenticated, skipping save to Drive');
+            return;
+        }
+
+        try {
+            this.updateSyncStatus('syncing', 'Saving...');
+            console.log('Saving data to Google Drive...');
+            
+            const dataBlob = JSON.stringify(this.data, null, 2);
+            const metadata = {
+                name: this.DATA_FILE_NAME,
+                mimeType: 'application/json'
+            };
+
+            if (this.dataFileId) {
+                // Update existing file
+                console.log('Updating existing file:', this.dataFileId);
+                
+                await gapi.client.request({
+                    path: `https://www.googleapis.com/upload/drive/v3/files/${this.dataFileId}`,
+                    method: 'PATCH',
+                    params: { uploadType: 'media' },
+                    headers: { 'Content-Type': 'application/json' },
+                    body: dataBlob
+                });
+                
+            } else {
+                // Create new file
+                console.log('Creating new data file');
+                
+                const form = new FormData();
+                form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                form.append('file', new Blob([dataBlob], { type: 'application/json' }));
+
+                const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${gapi.client.getToken().access_token}`
+                    },
+                    body: form
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    this.dataFileId = result.id;
+                    console.log('New file created:', this.dataFileId);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            }
+            
+            console.log('Data saved successfully');
+            this.updateSyncStatus('synced');
+            
+        } catch (error) {
+            console.error('Error saving data to Drive:', error);
+            this.updateSyncStatus('error', 'Save failed');
+        }
+    }
+
+    // Replace localStorage methods with Google Drive
+    async saveData() {
+        await this.saveDataToDrive();
     }
 
     getNextId(collection) {
@@ -416,14 +860,14 @@ class TraclassApp {
     }
 
     getSelectedChecklistId(studentId) {
-        const key = `selected_checklist_${studentId}`;
-        const stored = localStorage.getItem(key);
-        return stored ? parseInt(stored) : null;
+        // Use a simple in-memory storage for chart selections
+        if (!this.chartSelections) this.chartSelections = {};
+        return this.chartSelections[studentId] || null;
     }
 
     setSelectedChecklistId(studentId, checklistId) {
-        const key = `selected_checklist_${studentId}`;
-        localStorage.setItem(key, checklistId.toString());
+        if (!this.chartSelections) this.chartSelections = {};
+        this.chartSelections[studentId] = checklistId;
     }
 
     // Students
@@ -532,7 +976,7 @@ class TraclassApp {
         this.editingStudent = null;
     }
 
-    handleStudentSubmit(e) {
+    async handleStudentSubmit(e) {
         e.preventDefault();
         
         const nameInput = document.getElementById('studentName');
@@ -570,7 +1014,7 @@ class TraclassApp {
             this.data.students.push(newStudent);
         }
 
-        this.saveData();
+        await this.saveData();
         this.hideStudentModal();
         this.renderStudents();
         this.renderDashboard();
@@ -584,21 +1028,21 @@ class TraclassApp {
         }
     }
 
-    archiveStudent(id) {
+    async archiveStudent(id) {
         const student = this.data.students.find(s => s.id === id);
         if (student) {
             student.archived = true;
-            this.saveData();
+            await this.saveData();
             this.renderStudents();
             this.renderDashboard();
         }
     }
 
-    restoreStudent(id) {
+    async restoreStudent(id) {
         const student = this.data.students.find(s => s.id === id);
         if (student) {
             student.archived = false;
-            this.saveData();
+            await this.saveData();
             this.renderStudents();
             this.renderDashboard();
         }
@@ -683,7 +1127,7 @@ class TraclassApp {
         this.editingClass = null;
     }
 
-    handleClassSubmit(e) {
+    async handleClassSubmit(e) {
         e.preventDefault();
         
         const nameInput = document.getElementById('className');
@@ -715,7 +1159,7 @@ class TraclassApp {
             this.data.classTypes.push(newClass);
         }
 
-        this.saveData();
+        await this.saveData();
         this.hideClassModal();
         this.renderClasses();
         this.renderStudents();
@@ -728,7 +1172,7 @@ class TraclassApp {
         }
     }
 
-    deleteClass(id) {
+    async deleteClass(id) {
         if (confirm('Are you sure you want to delete this class type? This action cannot be undone.')) {
             const classType = this.data.classTypes.find(ct => ct.id === id);
             if (classType) {
@@ -740,7 +1184,7 @@ class TraclassApp {
                 }
                 
                 this.data.classTypes = this.data.classTypes.filter(ct => ct.id !== id);
-                this.saveData();
+                await this.saveData();
                 this.renderClasses();
             }
         }
@@ -884,7 +1328,7 @@ class TraclassApp {
         if (form) form.reset();
     }
 
-    handleChecklistSubmit(e) {
+    async handleChecklistSubmit(e) {
         e.preventDefault();
         
         const studentSelect = document.getElementById('checklistStudent');
@@ -920,7 +1364,7 @@ class TraclassApp {
         // Auto-expand the student section after adding checklist
         this.expandedStudents.add(studentId);
         
-        this.saveData();
+        await this.saveData();
         this.hideChecklistModal();
         this.renderAttendance();
         this.renderDashboard();
@@ -1005,13 +1449,13 @@ class TraclassApp {
         this.currentChecklist = null;
     }
 
-    toggleSlotCompletion(checklistId, slotId) {
+    async toggleSlotCompletion(checklistId, slotId) {
         const checklist = this.data.checklists.find(c => c.id === checklistId);
         const slot = checklist.slots.find(s => s.id === slotId);
         
         if (slot) {
             slot.completed = !slot.completed;
-            this.saveData();
+            await this.saveData();
             this.renderAttendance();
             this.renderDashboard();
             
@@ -1035,17 +1479,17 @@ class TraclassApp {
         }
     }
 
-    updateSlotName(checklistId, slotId, newName) {
+    async updateSlotName(checklistId, slotId, newName) {
         const checklist = this.data.checklists.find(c => c.id === checklistId);
         const slot = checklist.slots.find(s => s.id === slotId);
         
         if (slot && newName.trim()) {
             slot.name = newName.trim();
-            this.saveData();
+            await this.saveData();
         }
     }
 
-    addSlotToChecklist() {
+    async addSlotToChecklist() {
         if (!this.currentChecklist) return;
 
         const newSlot = {
@@ -1055,7 +1499,7 @@ class TraclassApp {
         };
 
         this.currentChecklist.slots.push(newSlot);
-        this.saveData();
+        await this.saveData();
         this.viewChecklistDetail(this.currentChecklist.id);
         this.renderAttendance();
         this.renderDashboard();
