@@ -30,6 +30,8 @@ class TraclassApp {
         this.dataFileId = null;
         this.userInfo = null;
         this.bypassAuth = false;
+        this.initializationAttempted = false;
+        this.appInitialized = false;
         
         this.init();
     }
@@ -37,7 +39,7 @@ class TraclassApp {
     async init() {
         console.log('Initializing Traclass app...');
         
-        // Set up offline button listeners immediately
+        // Set up offline button listeners immediately and repeatedly
         this.setupOfflineButtonListeners();
         
         // Check if we should bypass authentication (for testing)
@@ -49,56 +51,90 @@ class TraclassApp {
             return;
         }
         
-        // Try to initialize Google APIs with timeout
+        // Ensure we only attempt initialization once
+        if (this.initializationAttempted) {
+            return;
+        }
+        this.initializationAttempted = true;
+        
+        // Try to initialize Google APIs with proper timeout and retry
         try {
+            this.updateSyncStatus('syncing', 'Initializing...');
             await Promise.race([
                 this.initializeGoogleAPIs(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Initialization timeout')), 10000))
             ]);
         } catch (error) {
-            console.warn('Google APIs initialization failed or timed out:', error);
+            console.warn('Google APIs initialization failed:', error);
+            this.updateSyncStatus('error', 'Init failed');
             this.showAuthFallback();
         }
     }
 
     setupOfflineButtonListeners() {
-        // Set up offline button listeners
-        const continueOfflineBtn = document.getElementById('continueOfflineBtn');
-        if (continueOfflineBtn) {
-            continueOfflineBtn.addEventListener('click', () => {
-                console.log('Continue Offline button clicked');
-                this.continueOffline();
-            });
-        }
-
-        // Set up retry offline button listener (will be created later)
-        setTimeout(() => {
+        // Set up offline button listeners with multiple attempts
+        const setupButtons = () => {
+            const continueOfflineBtn = document.getElementById('continueOfflineBtn');
             const retryOfflineBtn = document.getElementById('retryOfflineBtn');
-            if (retryOfflineBtn) {
-                retryOfflineBtn.addEventListener('click', () => {
+            
+            if (continueOfflineBtn && !continueOfflineBtn.dataset.listenerAdded) {
+                continueOfflineBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Continue Offline button clicked');
+                    this.continueOffline();
+                }, { capture: true });
+                continueOfflineBtn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    console.log('Continue Offline mousedown');
+                });
+                continueOfflineBtn.dataset.listenerAdded = 'true';
+                console.log('Continue Offline button listener added');
+            }
+            
+            if (retryOfflineBtn && !retryOfflineBtn.dataset.listenerAdded) {
+                retryOfflineBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     console.log('Retry Offline button clicked');
                     this.continueOffline();
-                });
+                }, { capture: true });
+                retryOfflineBtn.dataset.listenerAdded = 'true';
+                console.log('Retry Offline button listener added');
             }
-        }, 100);
+        };
+
+        // Try immediately and with delays
+        setupButtons();
+        setTimeout(setupButtons, 100);
+        setTimeout(setupButtons, 500);
+        setTimeout(setupButtons, 1000);
 
         // Set up sign out button listener
         setTimeout(() => {
             const signOutBtn = document.getElementById('signOutBtn');
-            if (signOutBtn) {
-                signOutBtn.addEventListener('click', () => {
+            if (signOutBtn && !signOutBtn.dataset.listenerAdded) {
+                signOutBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
                     console.log('Sign Out button clicked');
                     this.signOut();
                 });
+                signOutBtn.dataset.listenerAdded = 'true';
             }
         }, 100);
     }
 
     async initializeOfflineMode() {
+        if (this.appInitialized) {
+            console.log('App already initialized, skipping');
+            return;
+        }
+        
         console.log('Starting in offline mode with sample data');
         this.isAuthenticated = true;
         this.bypassAuth = true;
         this.userInfo = { name: 'Demo User', email: 'demo@example.com' };
+        this.appInitialized = true;
         
         this.hideAuthOverlay();
         this.loadSampleData();
@@ -110,27 +146,21 @@ class TraclassApp {
     }
 
     showAuthFallback() {
-        // Show fallback option to continue without Google Drive
+        console.log('Showing auth fallback');
         const authError = document.getElementById('authError');
         if (authError) {
             authError.innerHTML = `
                 <p>Google Drive sync is not available.</p>
-                <p>Continue with offline mode to test the application.</p>
+                <p>This could be due to API access restrictions or network issues.</p>
                 <button class="btn btn--primary" id="retryOfflineBtn">Continue Offline</button>
                 <button class="btn btn--secondary" onclick="location.reload()">Retry</button>
             `;
             authError.classList.remove('hidden');
             
-            // Re-setup the retry offline button listener
+            // Re-setup the retry offline button listener immediately
             setTimeout(() => {
-                const retryOfflineBtn = document.getElementById('retryOfflineBtn');
-                if (retryOfflineBtn) {
-                    retryOfflineBtn.addEventListener('click', () => {
-                        console.log('Retry Offline button clicked');
-                        this.continueOffline();
-                    });
-                }
-            }, 100);
+                this.setupOfflineButtonListeners();
+            }, 50);
         }
         
         // Hide loading and sign-in button
@@ -146,43 +176,58 @@ class TraclassApp {
         this.initializeOfflineMode();
     }
 
-    // Google API Initialization
+    // Google API Initialization - Improved with better error handling
     async initializeGoogleAPIs() {
         try {
             console.log('Loading Google APIs...');
             
             // Check if Google APIs are available
             if (typeof gapi === 'undefined') {
-                throw new Error('Google API library not loaded');
+                throw new Error('Google API library not loaded - check internet connection or API availability');
             }
             
-            // Initialize GAPI
+            // Initialize GAPI with proper error handling
             await new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => {
+                    reject(new Error('GAPI load timeout'));
+                }, 10000);
+                
                 gapi.load('client', {
-                    callback: resolve,
-                    onerror: reject,
-                    timeout: 5000,
-                    ontimeout: reject
+                    callback: () => {
+                        clearTimeout(timeoutId);
+                        resolve();
+                    },
+                    onerror: (error) => {
+                        clearTimeout(timeoutId);
+                        reject(new Error('Failed to load GAPI client: ' + error));
+                    },
+                    timeout: 8000,
+                    ontimeout: () => {
+                        clearTimeout(timeoutId);
+                        reject(new Error('GAPI client load timeout'));
+                    }
                 });
             });
 
+            // Initialize the client with proper error handling
             await gapi.client.init({
                 apiKey: this.API_KEY,
                 discoveryDocs: [this.DISCOVERY_DOC],
             });
             
             this.gapiInitialized = true;
-            console.log('GAPI initialized');
+            console.log('GAPI initialized successfully');
 
             // Initialize Google Identity Services
-            if (typeof google !== 'undefined' && google.accounts) {
+            if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
                 this.tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: this.CLIENT_ID,
                     scope: this.SCOPES,
                     callback: (tokenResponse) => {
-                        console.log('Token received:', tokenResponse);
+                        console.log('Token received');
                         if (tokenResponse.error) {
                             console.error('Token error:', tokenResponse.error);
+                            this.updateSyncStatus('error', 'Auth failed');
                             this.showAuthFallback();
                         } else {
                             this.handleAuthSuccess(tokenResponse);
@@ -190,13 +235,14 @@ class TraclassApp {
                     },
                     error_callback: (error) => {
                         console.error('Token client error:', error);
+                        this.updateSyncStatus('error', 'Auth error');
                         this.showAuthFallback();
                     }
                 });
                 this.gisInitialized = true;
-                console.log('Google Identity Services initialized');
+                console.log('Google Identity Services initialized successfully');
             } else {
-                throw new Error('Google Identity Services not available');
+                throw new Error('Google Identity Services not available - check API access');
             }
 
             // Set up global callback for credential response
@@ -205,10 +251,12 @@ class TraclassApp {
                 this.handleCredentialResponse(credentialResponse);
             };
 
+            this.updateSyncStatus('synced', 'Ready to sign in');
             this.showAuthOverlay();
             
         } catch (error) {
             console.error('Failed to initialize Google APIs:', error);
+            this.updateSyncStatus('error', 'API unavailable');
             throw error;
         }
     }
@@ -216,6 +264,7 @@ class TraclassApp {
     handleCredentialResponse(credentialResponse) {
         console.log('Processing credential response...');
         this.showAuthLoading();
+        this.updateSyncStatus('syncing', 'Authenticating...');
         
         try {
             // Request access token
@@ -226,6 +275,7 @@ class TraclassApp {
             }
         } catch (error) {
             console.error('Error requesting access token:', error);
+            this.updateSyncStatus('error', 'Auth failed');
             this.showAuthFallback();
         }
     }
@@ -234,6 +284,7 @@ class TraclassApp {
         try {
             console.log('Authentication successful');
             this.isAuthenticated = true;
+            this.updateSyncStatus('syncing', 'Loading profile...');
             
             // Get user info
             const response = await gapi.client.request({
@@ -241,18 +292,21 @@ class TraclassApp {
             });
             
             this.userInfo = response.result;
-            console.log('User info:', this.userInfo);
+            console.log('User info loaded:', this.userInfo.name);
             
             this.hideAuthOverlay();
+            this.updateSyncStatus('syncing', 'Loading data...');
             await this.loadDataFromDrive();
             this.setupEventListeners();
             this.renderAll();
             this.showTab('dashboard');
             this.updateUserProfile();
-            this.updateSyncStatus('synced');
+            this.updateSyncStatus('synced', 'Synced');
+            this.appInitialized = true;
             
         } catch (error) {
             console.error('Authentication error:', error);
+            this.updateSyncStatus('error', 'Auth failed');
             this.showAuthFallback();
         }
     }
@@ -261,6 +315,11 @@ class TraclassApp {
         const overlay = document.getElementById('authOverlay');
         if (overlay) {
             overlay.classList.remove('hidden');
+            
+            // Re-setup button listeners when overlay is shown
+            setTimeout(() => {
+                this.setupOfflineButtonListeners();
+            }, 100);
             
             // Add escape key handler
             const handleEscape = (e) => {
@@ -329,6 +388,8 @@ class TraclassApp {
                 text.textContent = message || 'Syncing...';
                 break;
             case 'synced':
+                // Green status for synced state
+                indicator.classList.remove('syncing', 'error');
                 text.textContent = 'Synced';
                 break;
             case 'offline':
@@ -344,7 +405,7 @@ class TraclassApp {
 
     async signOut() {
         try {
-            if (!this.bypassAuth && gapi.client.getToken()) {
+            if (!this.bypassAuth && gapi && gapi.client && gapi.client.getToken()) {
                 google.accounts.oauth2.revoke(gapi.client.getToken().access_token);
                 gapi.client.setToken('');
             }
@@ -353,6 +414,7 @@ class TraclassApp {
             this.userInfo = null;
             this.dataFileId = null;
             this.data = { students: [], classTypes: [], checklists: [] };
+            this.appInitialized = false;
             
             location.reload();
         } catch (error) {
@@ -361,7 +423,7 @@ class TraclassApp {
         }
     }
 
-    // Google Drive Data Management
+    // Google Drive Data Management - Improved with robust file handling
     async loadDataFromDrive() {
         if (this.bypassAuth) {
             console.log('Bypass mode: loading sample data');
@@ -369,49 +431,87 @@ class TraclassApp {
             return;
         }
 
+        if (!this.gapiInitialized || !this.isAuthenticated) {
+            throw new Error('Google API not initialized or not authenticated');
+        }
+
         try {
-            this.updateSyncStatus('syncing', 'Loading data...');
+            this.updateSyncStatus('syncing', 'Searching for data...');
             console.log('Loading data from Google Drive...');
             
             // Search for existing data file
             const searchResponse = await gapi.client.drive.files.list({
-                q: `name='${this.DATA_FILE_NAME}' and mimeType='application/json'`,
-                spaces: 'drive'
+                q: `name='${this.DATA_FILE_NAME}' and mimeType='application/json' and trashed=false`,
+                spaces: 'drive',
+                fields: 'files(id, name, createdTime)'
             });
 
             const files = searchResponse.result.files;
+            console.log('Search result:', files);
             
             if (files && files.length > 0) {
                 // File exists, load it
                 this.dataFileId = files[0].id;
                 console.log('Found existing data file:', this.dataFileId);
                 
-                const fileResponse = await gapi.client.drive.files.get({
-                    fileId: this.dataFileId,
-                    alt: 'media'
-                });
+                this.updateSyncStatus('syncing', 'Loading file...');
                 
-                if (fileResponse.body) {
-                    const fileData = JSON.parse(fileResponse.body);
-                    this.data = fileData;
-                    console.log('Data loaded from Drive:', this.data);
+                try {
+                    const fileResponse = await gapi.client.drive.files.get({
+                        fileId: this.dataFileId,
+                        alt: 'media'
+                    });
+                    
+                    if (fileResponse.body) {
+                        const fileData = JSON.parse(fileResponse.body);
+                        
+                        // Validate the loaded data structure
+                        if (this.validateDataStructure(fileData)) {
+                            this.data = fileData;
+                            console.log('Data loaded successfully from Drive');
+                        } else {
+                            console.warn('Invalid data structure, using sample data');
+                            this.loadSampleData();
+                            await this.saveDataToDrive(); // Overwrite with valid data
+                        }
+                    } else {
+                        throw new Error('Empty file response');
+                    }
+                } catch (loadError) {
+                    console.error('Error loading existing file:', loadError);
+                    // If file exists but can't be loaded, create new with sample data
+                    this.dataFileId = null;
+                    this.loadSampleData();
+                    await this.saveDataToDrive();
                 }
             } else {
                 // No file exists, create with sample data
-                console.log('No existing data file found, creating with sample data');
+                console.log('No existing data file found, creating new one');
+                this.dataFileId = null;
                 this.loadSampleData();
                 await this.saveDataToDrive();
             }
             
-            this.updateSyncStatus('synced');
-            
         } catch (error) {
-            console.error('Error loading data from Drive:', error);
+            console.error('Error in loadDataFromDrive:', error);
             this.updateSyncStatus('error', 'Load failed');
             
-            // Fallback to sample data
+            // Check if it's an API access error
+            if (error.status === 403 || error.result?.error?.code === 403) {
+                throw new Error('Google Drive API access denied. Please check API permissions.');
+            }
+            
+            // Fallback to sample data for other errors
             this.loadSampleData();
+            this.updateSyncStatus('offline', 'Using offline data');
         }
+    }
+
+    validateDataStructure(data) {
+        return data && 
+               Array.isArray(data.students) && 
+               Array.isArray(data.classTypes) && 
+               Array.isArray(data.checklists);
     }
 
     loadSampleData() {
@@ -504,6 +604,11 @@ class TraclassApp {
             return;
         }
 
+        if (!this.gapiInitialized) {
+            console.warn('GAPI not initialized, cannot save to Drive');
+            return;
+        }
+
         try {
             this.updateSyncStatus('syncing', 'Saving...');
             console.log('Saving data to Google Drive...');
@@ -518,15 +623,30 @@ class TraclassApp {
                 // Update existing file
                 console.log('Updating existing file:', this.dataFileId);
                 
-                await gapi.client.request({
-                    path: `https://www.googleapis.com/upload/drive/v3/files/${this.dataFileId}`,
-                    method: 'PATCH',
-                    params: { uploadType: 'media' },
-                    headers: { 'Content-Type': 'application/json' },
-                    body: dataBlob
-                });
+                // First verify the file still exists
+                try {
+                    await gapi.client.drive.files.get({
+                        fileId: this.dataFileId,
+                        fields: 'id,name'
+                    });
+                } catch (verifyError) {
+                    console.warn('File verification failed, creating new file:', verifyError);
+                    this.dataFileId = null;
+                }
                 
-            } else {
+                if (this.dataFileId) {
+                    await gapi.client.request({
+                        path: `https://www.googleapis.com/upload/drive/v3/files/${this.dataFileId}`,
+                        method: 'PATCH',
+                        params: { uploadType: 'media' },
+                        headers: { 'Content-Type': 'application/json' },
+                        body: dataBlob
+                    });
+                    console.log('File updated successfully');
+                }
+            }
+            
+            if (!this.dataFileId) {
                 // Create new file
                 console.log('Creating new data file');
                 
@@ -534,10 +654,15 @@ class TraclassApp {
                 form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
                 form.append('file', new Blob([dataBlob], { type: 'application/json' }));
 
+                const token = gapi.client.getToken();
+                if (!token) {
+                    throw new Error('No access token available');
+                }
+
                 const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${gapi.client.getToken().access_token}`
+                        'Authorization': `Bearer ${token.access_token}`
                     },
                     body: form
                 });
@@ -545,18 +670,27 @@ class TraclassApp {
                 if (response.ok) {
                     const result = await response.json();
                     this.dataFileId = result.id;
-                    console.log('New file created:', this.dataFileId);
+                    console.log('New file created successfully:', this.dataFileId);
                 } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
             }
             
-            console.log('Data saved successfully');
-            this.updateSyncStatus('synced');
+            console.log('Data saved successfully to Drive');
+            this.updateSyncStatus('synced', 'Synced');
             
         } catch (error) {
             console.error('Error saving data to Drive:', error);
-            this.updateSyncStatus('error', 'Save failed');
+            
+            // Check for specific error types
+            if (error.status === 403 || error.result?.error?.code === 403) {
+                this.updateSyncStatus('error', 'Access denied');
+            } else if (error.status === 401 || error.result?.error?.code === 401) {
+                this.updateSyncStatus('error', 'Auth expired');
+            } else {
+                this.updateSyncStatus('error', 'Save failed');
+            }
         }
     }
 
@@ -569,125 +703,109 @@ class TraclassApp {
         return Math.max(0, ...collection.map(item => item.id)) + 1;
     }
 
-    // Event Listeners - Fixed navigation issue
+    // Event Listeners - Fixed navigation and button issues
     setupEventListeners() {
-        // Wait a bit to ensure DOM is ready
+        if (this.eventListenersSetup) {
+            console.log('Event listeners already setup, skipping');
+            return;
+        }
+        
+        console.log('Setting up event listeners...');
+        this.eventListenersSetup = true;
+        
+        // Wait for DOM to be ready
         setTimeout(() => {
-            // Navigation - Direct event listeners on each nav link
+            // Navigation - Direct event listeners on each nav link with better handling
             const navLinks = document.querySelectorAll('.nav-link');
-            navLinks.forEach(link => {
+            console.log('Found nav links:', navLinks.length);
+            
+            navLinks.forEach((link, index) => {
+                if (link.dataset.listenerAdded) return;
+                
+                const tab = link.dataset.tab;
+                console.log(`Setting up nav link ${index + 1}: ${tab}`);
+                
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const tab = e.currentTarget.dataset.tab;
-                    console.log('Clicked tab:', tab);
+                    e.stopPropagation();
+                    console.log('Navigation clicked:', tab);
                     this.showTab(tab);
-                });
+                }, { capture: true });
+                
+                link.dataset.listenerAdded = 'true';
             });
 
             // Students
-            const addStudentBtn = document.getElementById('addStudentBtn');
-            if (addStudentBtn) {
-                addStudentBtn.addEventListener('click', () => this.showStudentModal());
-            }
-            
-            const toggleArchivedBtn = document.getElementById('toggleArchivedBtn');
-            if (toggleArchivedBtn) {
-                toggleArchivedBtn.addEventListener('click', () => this.toggleArchivedStudents());
-            }
-
-            const studentForm = document.getElementById('studentForm');
-            if (studentForm) {
-                studentForm.addEventListener('submit', (e) => this.handleStudentSubmit(e));
-            }
-
-            const closeStudentModal = document.getElementById('closeStudentModal');
-            if (closeStudentModal) {
-                closeStudentModal.addEventListener('click', () => this.hideStudentModal());
-            }
-
-            const cancelStudentBtn = document.getElementById('cancelStudentBtn');
-            if (cancelStudentBtn) {
-                cancelStudentBtn.addEventListener('click', () => this.hideStudentModal());
-            }
+            this.setupElementListener('addStudentBtn', () => this.showStudentModal());
+            this.setupElementListener('toggleArchivedBtn', () => this.toggleArchivedStudents());
+            this.setupFormListener('studentForm', (e) => this.handleStudentSubmit(e));
+            this.setupElementListener('closeStudentModal', () => this.hideStudentModal());
+            this.setupElementListener('cancelStudentBtn', () => this.hideStudentModal());
 
             // Classes
-            const addClassBtn = document.getElementById('addClassBtn');
-            if (addClassBtn) {
-                addClassBtn.addEventListener('click', () => this.showClassModal());
-            }
-
-            const classForm = document.getElementById('classForm');
-            if (classForm) {
-                classForm.addEventListener('submit', (e) => this.handleClassSubmit(e));
-            }
-
-            const closeClassModal = document.getElementById('closeClassModal');
-            if (closeClassModal) {
-                closeClassModal.addEventListener('click', () => this.hideClassModal());
-            }
-
-            const cancelClassBtn = document.getElementById('cancelClassBtn');
-            if (cancelClassBtn) {
-                cancelClassBtn.addEventListener('click', () => this.hideClassModal());
-            }
+            this.setupElementListener('addClassBtn', () => this.showClassModal());
+            this.setupFormListener('classForm', (e) => this.handleClassSubmit(e));
+            this.setupElementListener('closeClassModal', () => this.hideClassModal());
+            this.setupElementListener('cancelClassBtn', () => this.hideClassModal());
 
             // Checklists
-            const addChecklistBtn = document.getElementById('addChecklistBtn');
-            if (addChecklistBtn) {
-                addChecklistBtn.addEventListener('click', () => this.showChecklistModal());
-            }
-
-            const checklistForm = document.getElementById('checklistForm');
-            if (checklistForm) {
-                checklistForm.addEventListener('submit', (e) => this.handleChecklistSubmit(e));
-            }
-
-            const closeChecklistModal = document.getElementById('closeChecklistModal');
-            if (closeChecklistModal) {
-                closeChecklistModal.addEventListener('click', () => this.hideChecklistModal());
-            }
-
-            const cancelChecklistBtn = document.getElementById('cancelChecklistBtn');
-            if (cancelChecklistBtn) {
-                cancelChecklistBtn.addEventListener('click', () => this.hideChecklistModal());
-            }
+            this.setupElementListener('addChecklistBtn', () => this.showChecklistModal());
+            this.setupFormListener('checklistForm', (e) => this.handleChecklistSubmit(e));
+            this.setupElementListener('closeChecklistModal', () => this.hideChecklistModal());
+            this.setupElementListener('cancelChecklistBtn', () => this.hideChecklistModal());
 
             // Checklist Detail
-            const closeChecklistDetailModal = document.getElementById('closeChecklistDetailModal');
-            if (closeChecklistDetailModal) {
-                closeChecklistDetailModal.addEventListener('click', () => this.hideChecklistDetailModal());
-            }
-
-            const shareChecklistBtn = document.getElementById('shareChecklistBtn');
-            if (shareChecklistBtn) {
-                shareChecklistBtn.addEventListener('click', () => this.exportChecklist());
-            }
-            
-            // Additional checklist detail buttons
-            const addSlotBtn = document.getElementById('addSlotBtn');
-            if (addSlotBtn) {
-                addSlotBtn.addEventListener('click', () => this.addSlotToChecklist());
-            }
-
-            const hideChecklistBtn = document.getElementById('hideChecklistBtn');
-            if (hideChecklistBtn) {
-                hideChecklistBtn.addEventListener('click', () => this.hideChecklistDetailModal());
-            }
+            this.setupElementListener('closeChecklistDetailModal', () => this.hideChecklistDetailModal());
+            this.setupElementListener('shareChecklistBtn', () => this.exportChecklist());
+            this.setupElementListener('addSlotBtn', () => this.addSlotToChecklist());
+            this.setupElementListener('hideChecklistBtn', () => this.hideChecklistDetailModal());
 
             // Modal backdrop clicks
             document.querySelectorAll('.modal').forEach(modal => {
+                if (modal.dataset.backdropListenerAdded) return;
+                
                 modal.addEventListener('click', (e) => {
                     if (e.target === modal || e.target.classList.contains('modal-backdrop')) {
                         modal.classList.add('hidden');
                     }
                 });
+                modal.dataset.backdropListenerAdded = 'true';
             });
+            
+            console.log('Event listeners setup complete');
         }, 100);
     }
 
-    // Navigation
+    setupElementListener(elementId, handler) {
+        const element = document.getElementById(elementId);
+        if (element && !element.dataset.listenerAdded) {
+            element.addEventListener('click', (e) => {
+                e.preventDefault();
+                handler();
+            });
+            element.dataset.listenerAdded = 'true';
+            console.log(`Listener added for: ${elementId}`);
+        }
+    }
+
+    setupFormListener(formId, handler) {
+        const form = document.getElementById(formId);
+        if (form && !form.dataset.listenerAdded) {
+            form.addEventListener('submit', handler);
+            form.dataset.listenerAdded = 'true';
+            console.log(`Form listener added for: ${formId}`);
+        }
+    }
+
+    // Navigation - Fixed to prevent overlay reappearance
     showTab(tabName) {
         console.log('Showing tab:', tabName);
+        
+        // Don't show auth overlay if app is already initialized
+        if (!this.appInitialized) {
+            console.log('App not initialized, skipping tab switch');
+            return;
+        }
         
         // Update nav links
         document.querySelectorAll('.nav-link').forEach(link => {
